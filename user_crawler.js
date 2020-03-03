@@ -4,6 +4,7 @@ const redis = require('redis');
 const mysql = require('mysql');
 const moment = require('moment');
 const db = require('./db');
+const cheerio = require('cheerio');
 
 //initiate mysql
 let connection = mysql.createConnection({
@@ -23,8 +24,8 @@ r_client.hmset('proxy', {
 }, redis.print);
 
 // cookie & agent
-let cookie = 'SCF=AvTgBgYggK293VebdtLE8S3ESHQHmVX3AffiV1G0abAVLAB4LXZNMlWENe4f1UKFZdDT99tWPtnDtdDMUtgEZdk.; SUB=_2A25zVqCBDeRhGeFM4lAX9SzEyjyIHXVQuMDJrDV6PUJbktAKLU7FkW1NQIj27i796YGoXJBDiP57l3FvzBgXauE6; SUBP=0033WrSXqPxfM725Ws9jqgMF55529P9D9W5JbI6i0Pb6dq5dilJi3GmU5JpX5KzhUgL.FoME1KzcSKzReK52dJLoIEBLxKMLBoBLBKzLxK.L1KnLBoeLxKqL1h.L12BLxKnL12zLBo2t; SUHB=0BLop1loeSYQQi; _T_WM=87680097880';
-let agent = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_3) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/80.0.3987.122 Safari/537.36';
+let cookie = "SCF=AvTgBgYggK293VebdtLE8S3ESHQHmVX3AffiV1G0abAVLAB4LXZNMlWENe4f1UKFZdDT99tWPtnDtdDMUtgEZdk.; SUB=_2A25zVqCBDeRhGeFM4lAX9SzEyjyIHXVQuMDJrDV6PUJbktAKLU7FkW1NQIj27i796YGoXJBDiP57l3FvzBgXauE6; SUBP=0033WrSXqPxfM725Ws9jqgMF55529P9D9W5JbI6i0Pb6dq5dilJi3GmU5JpX5KzhUgL.FoME1KzcSKzReK52dJLoIEBLxKMLBoBLBKzLxK.L1KnLBoeLxKqL1h.L12BLxKnL12zLBo2t; SUHB=0BLop1loeSYQQi; _T_WM=87680097880";
+let agent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_3) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/80.0.3987.122 Safari/537.36";
 
 function  get_random_agent_from_redis() {
     return new Promise((resolve, reject) => {
@@ -63,44 +64,69 @@ function get_user_id_from_db(limit, offset) {
     })
 }
 
-function get_html(url, cookie, agent, proxy = '') {
-    return new Promise((resolve, reject) => {
-        let options = {
-            url: url,
-            headers: {
-                'user-agent': agent,
-                'cookie': cookie
-            },
-        };
-        // assume proxy pattern is like 'xxx.xxx.xxx.xxx:port'
-        if (proxy != '') {
-            options['host'] = proxy.split(':')[0];
-            options['port'] = proxy.split(':')[1];
-        }
-        request(options, (err, resp, body) => {
-            if (err || resp.statusCode != 200) reject(err);
-            resolve(body);
-        })
-    })
-}
+module.exports = class {
+    constructor() {
+        //
+    }
 
-// concurrent 10 ids and find out the longest time
-(async () => {
-    let ids = await get_user_id_from_db(100, 0);
-    let start_time = moment();
-    ids.forEach((item) => {
-        get_html(item.url, cookie, agent).then((html) => {
-            let duration = moment()-start_time;
-            console.log(duration)
-            db.save_data_to_redis('pages', html.toString()).then((result) => {
+    get_html(url, cookie, agent, proxy) {
+        return new Promise(async (resolve, reject) => {
+            let random_cookie = await db.get_random_cookie_from_redis();
+            let random_agent = await db.get_random_agent_from_redis();
+            cookie = cookie || random_cookie;
+            agent = agent || random_agent;
+            // default disable proxy
+            proxy = proxy || false;
+            let options = {
+                url: url,
+                headers: {
+                    'user-agent': agent,
+                    'cookie': cookie
+                },
+            };
+            // assume proxy pattern is like 'xxx.xxx.xxx.xxx:port'
+            if (proxy) {
+                let random_proxy = await db.get_proxy();
+                options['host'] = random_proxy.split(':')[0];
+                options['port'] = random_proxy.split(':')[1];
+            }
+            request(options, (err, resp, body) => {
+                if (err || resp.statusCode != 200) reject(err);
+                resolve(body);
+            })
+        })
+    }
+
+    async crawl_to_date(user_id, start_url, target_date) {
+        let _page = 2;
+        let _stop = false;
+        let _this = this;
+        while (!_stop) {
+            let html = await _this.get_html(start_url + '&page=' + _page);
+            console.log('page:', _page);
+            console.log('html:', html);
+            let time_stamp = moment().unix();
+            db.save_data_to_redis('pages',user_id+'_page'+_page+'_'+time_stamp, html.toString()).then((result) => {
                 console.log(result);
             }).catch((err) => {
                 console.log(err);
-            });
-        }).catch((err) => {
-            console.log(err);
-            let duration = moment()-start_time;
-            console.log(duration)
-        });
-    })
-})()
+            })
+            let $ = cheerio.load(html);
+            let date_list = $('.ct').toArray();
+            if (date_list.length > 0) {
+                let _date = date_list[date_list.length - 1].children[0].data.split(' ')[0];
+                if (_date.split('-').length > 1) {
+                    if (moment(_date).isBefore(moment(target_date))) {
+                        _stop = true;
+                    } else {
+                        _page++;
+                    }
+                } else {
+                    _page++;
+                }
+            } else {
+                _stop = true;
+            }
+        }
+    }
+}

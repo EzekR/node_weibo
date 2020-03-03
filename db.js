@@ -30,6 +30,17 @@ module.exports = {
         })
     },
 
+    get_random_cookie_from_redis: () => {
+        return new Promise((resolve, reject) => {
+            r_client.get('cookies', (err, result) => {
+                if (err) reject(err);
+                let cookie_list = JSON.parse(result);
+                let random = cookie_list[Math.floor(Math.random()*cookie_list.length)];
+                resolve(random);
+            })
+        })
+    },
+
     get_proxy: () => {
         return new Promise((resolve, reject) => {
             r_client.hget('proxy', 'proxy_index', (err, result) => {
@@ -56,9 +67,9 @@ module.exports = {
         })
     },
 
-    save_data_to_redis: (set_name, data) => {
+    save_data_to_redis: (map_name, key, data) => {
         return new Promise((resolve, reject) => {
-            r_client.sadd(set_name, data, (err, result) => {
+            r_client.hmset(map_name, key, data, (err, result) => {
                 if (err) reject(err);
                 resolve(result);
             })
