@@ -1,4 +1,7 @@
-const request = require('request');
+const request = require('request').defaults({
+    //proxy: 'http://223.245.38.117:65309',
+    //rejectUnauthorized: false
+});
 const fs = require('fs');
 const redis = require('redis');
 const mysql = require('mysql');
@@ -71,11 +74,8 @@ module.exports = class {
 
     get_html(url, cookie, agent, proxy) {
         return new Promise(async (resolve, reject) => {
-            let random_cookie = await db.get_random_cookie_from_redis();
             let random_agent = await db.get_random_agent_from_redis();
-            cookie = cookie || random_cookie;
             agent = agent || random_agent;
-            // default disable proxy
             proxy = proxy || false;
             let options = {
                 url: url,
@@ -90,42 +90,62 @@ module.exports = class {
                 options['host'] = random_proxy.split(':')[0];
                 options['port'] = random_proxy.split(':')[1];
             }
+            console.log('options:', options);
             request(options, (err, resp, body) => {
-                if (err || resp.statusCode != 200) reject(err);
+                if (err || resp.statusCode != 200) {
+                    console.log('error:', err);
+                    console.log('crawl html error:', resp.statusCode);
+                    console.log('current url:', url);
+                    reject(err);
+                }
                 resolve(body);
             })
         })
     }
 
-    async crawl_to_date(user_id, start_url, target_date) {
+    async crawl_to_date(user_id, start_url, target_date, cookie) {
         let _page = 2;
         let _stop = false;
         let _this = this;
         while (!_stop) {
-            let html = await _this.get_html(start_url + '&page=' + _page);
-            console.log('page:', _page);
-            console.log('html:', html);
-            let time_stamp = moment().unix();
-            db.save_data_to_redis('pages',user_id+'_page'+_page+'_'+time_stamp, html.toString()).then((result) => {
-                console.log(result);
-            }).catch((err) => {
-                console.log(err);
-            })
-            let $ = cheerio.load(html);
-            let date_list = $('.ct').toArray();
-            if (date_list.length > 0) {
-                let _date = date_list[date_list.length - 1].children[0].data.split(' ')[0];
-                if (_date.split('-').length > 1) {
-                    if (moment(_date).isBefore(moment(target_date))) {
-                        _stop = true;
+            try {
+                let html = await _this.get_html(start_url + '&page=' + _page, cookie);
+                console.log('page:', _page);
+                console.log('html:', html);
+                let time_stamp = moment().unix();
+                db.save_data_to_redis('pages',user_id+'_page'+_page+'_'+time_stamp, html.toString()).then((result) => {
+                    console.log(result);
+                }).catch((err) => {
+                    console.log(err);
+                });
+                let $ = cheerio.load(html);
+                let date_list = $('.ct').toArray();
+                if (date_list.length > 0) {
+                    let _date = date_list[date_list.length - 1].children[0].data.split(' ')[0];
+                    if (_date.split('-').length > 1) {
+                        if (moment(_date).isBefore(moment(target_date))) {
+                            _stop = true;
+                        } else {
+                            _page++;
+                            if (_page >=49) {
+                                _stop = true;
+                                db.record_idiots(start_url);
+                            }
+                        }
                     } else {
                         _page++;
+                        if (_page >= 49) {
+                            _stop = true;
+                            db.record_idiots(start_url);
+                        }
                     }
                 } else {
-                    _page++;
+                    _stop = true;
                 }
-            } else {
-                _stop = true;
+            } catch (e) {
+               console.log(e);
+               _stop = true;
+               db.record_failed_uris(start_url+'&page='+_page);
             }
         }
     }
