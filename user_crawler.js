@@ -75,6 +75,7 @@ module.exports = class {
     get_html(url, cookie, agent, proxy) {
         return new Promise(async (resolve, reject) => {
             let random_agent = await db.get_random_agent_from_redis();
+            let random_proxy = await db.get_proxy();
             agent = agent || random_agent;
             proxy = proxy || false;
             let options = {
@@ -83,13 +84,9 @@ module.exports = class {
                     'user-agent': agent,
                     'cookie': cookie
                 },
+                proxy: random_proxy.toLowerCase()
             };
             // assume proxy pattern is like 'xxx.xxx.xxx.xxx:port'
-            if (proxy) {
-                let random_proxy = await db.get_proxy();
-                options['host'] = random_proxy.split(':')[0];
-                options['port'] = random_proxy.split(':')[1];
-            }
             console.log('options:', options);
             request(options, (err, resp, body) => {
                 if (err || resp.statusCode != 200) {
@@ -107,6 +104,8 @@ module.exports = class {
         let _page = 2;
         let _stop = false;
         let _this = this;
+        // add lock
+        db.set_net_lock('1');
         while (!_stop) {
             try {
                 let html = await _this.get_html(start_url + '&page=' + _page, cookie);
@@ -125,10 +124,13 @@ module.exports = class {
                     if (_date.split('-').length > 1) {
                         if (moment(_date).isBefore(moment(target_date))) {
                             _stop = true;
+                            db.set_net_lock('0');
                         } else {
                             _page++;
                             if (_page >=49) {
                                 _stop = true;
+                                // release lock
+                                db.set_net_lock('0');
                                 db.record_idiots(start_url);
                             }
                         }
@@ -136,16 +138,19 @@ module.exports = class {
                         _page++;
                         if (_page >= 49) {
                             _stop = true;
+                            db.set_net_lock('0');
                             db.record_idiots(start_url);
                         }
                     }
                 } else {
                     _stop = true;
+                    db.set_net_lock('0');
                 }
             } catch (e) {
                console.log(e);
                _stop = true;
-               db.record_failed_uris(start_url+'&page='+_page);
+                db.set_net_lock('0');
+                db.record_failed_uris(start_url+'&page='+_page);
             }
         }
     }

@@ -29,11 +29,23 @@ function sleeper(duration) {
 
 (async () => {
     // test 1000 users
-    let ids = await db.get_user_id_from_db(100, 0);
-    for(let i=0; i<10; i++) {
-        let chunk = ids.slice(i*10, (i+1)*10);
-        await one_loop(chunk);
-        await sleeper(3000);
-        console.log('run again')
-    }
+    let ids = await db.get_user_id_from_db(100, 100);
+    // set concurrency
+    let concurrency = 10;
+    let start = 0;
+    let event_loop = setInterval(() => {
+        db.get_net_lock().then((lock) => {
+            if (lock == '0') {
+                let chunk = ids.slice(start, start+concurrency);
+                one_loop(chunk);
+                start = start+concurrency;
+                if (start > 100) {
+                    clearInterval(event_loop);
+                    console.log('stop crawling');
+                }
+            } else {
+                console.log('still requesting, wait...');
+            }
+        })
+    }, 1000);
 })();

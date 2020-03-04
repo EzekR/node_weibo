@@ -20,7 +20,7 @@ let connection = mysql.createConnection({
 
 // load cookie json
 (() => {
-    let json = fs.readFileSync('./cookie.json', 'utf-8');
+    let json = fs.readFileSync('./cookies.json', 'utf-8');
     let cookies = JSON.parse(json).value;
     let cookie_array = [];
     for(let key in cookies) {
@@ -39,6 +39,14 @@ let connection = mysql.createConnection({
     });
     let user_agents = ['Mozilla/5.0 (compatible; U; ABrowse 0.6; Syllable) AppleWebKit/420+ (KHTML, like Gecko)', 'Mozilla/5.0 (compatible; U; ABrowse 0.6;  Syllable) AppleWebKit/420+ (KHTML, like Gecko)', 'Mozilla/5.0 (compatible; MSIE 8.0; Windows NT 6.0; Trident/4.0; Acoo Browser 1.98.744; .NET CLR 3.5.30729)', 'Mozilla/5.0 (compatible; MSIE 8.0; Windows NT 6.0; Trident/4.0; Acoo Browser 1.98.744; .NET CLR   3.5.30729)', 'Mozilla/4.0 (compatible; MSIE 8.0; Windows NT 6.0; Trident/4.0;   Acoo Browser; GTB5; Mozilla/4.0 (compatible; MSIE 6.0; Windows NT 5.1;   SV1) ; InfoPath.1; .NET CLR 3.5.30729; .NET CLR 3.0.30618)', 'Mozilla/4.0 (compatible; MSIE 8.0; Windows NT 5.1; Trident/4.0; SV1; Acoo Browser; .NET CLR 2.0.50727; .NET CLR 3.0.4506.2152; .NET CLR 3.5.30729; Avant Browser)', 'Mozilla/4.0 (compatible; MSIE 7.0; Windows NT 6.0; Acoo Browser; SLCC1;   .NET CLR 2.0.50727; Media Center PC 5.0; .NET CLR 3.0.04506)', 'Mozilla/4.0 (compatible; MSIE 7.0; Windows NT 6.0; Acoo Browser; GTB5; Mozilla/4.0 (compatible; MSIE 6.0; Windows NT 5.1; SV1) ; Maxthon; InfoPath.1; .NET CLR 3.5.30729; .NET CLR 3.0.30618)', 'Mozilla/4.0 (compatible; Mozilla/5.0 (compatible; MSIE 8.0; Windows NT 6.0; Trident/4.0; Acoo Browser 1.98.744; .NET CLR 3.5.30729); Windows NT 5.1; Trident/4.0)', 'Mozilla/4.0 (compatible; Mozilla/4.0 (compatible; MSIE 8.0; Windows NT 5.1; Trident/4.0; GTB6; Acoo Browser; .NET CLR 1.1.4322; .NET CLR 2.0.50727); Windows NT 5.1; Trident/4.0; Maxthon; .NET CLR 2.0.50727; .NET CLR 1.1.4322; InfoPath.2)', 'Mozilla/4.0 (compatible; MSIE 8.0; Windows NT 6.0; Trident/4.0; Acoo Browser; GTB6; Mozilla/4.0 (compatible; MSIE 6.0; Windows NT 5.1; SV1) ; InfoPath.1; .NET CLR 3.5.30729; .NET CLR 3.0.30618)'];
     r_client.rpush('agents_array', user_agents, redis.print);
+    r_client.set('net_lock', '0', redis.print);
+    let proxy_file = fs.readFileSync('./proxy.json', 'utf-8');
+    let proxy = JSON.parse(proxy_file).value;
+    let proxy_array = [];
+    for(let key in proxy) {
+        proxy_array.push(proxy[key]);
+    }
+    r_client.rpush('proxy_list', proxy_array, redis.print);
 })();
 
 module.exports = {
@@ -87,13 +95,21 @@ module.exports = {
 
     get_proxy: () => {
         return new Promise((resolve, reject) => {
-            r_client.hget('proxy', 'proxy_index', (err, result) => {
+            //r_client.hget('proxy', 'proxy_index', (err, result) => {
+            //    if (err) reject(err);
+            //    let _index = parseInt(result);
+            //    r_client.hget('proxy', 'proxy_list', (err, result) => {
+            //        if (err) reject(err);
+            //        resolve(JSON.parse(result)[_index]);
+            //        r_client.hset('proxy', 'proxy_index', _index++, redis.print);
+            //    })
+            //})
+            r_client.llen('proxy_list', (err, len) => {
                 if (err) reject(err);
-                let _index = parseInt(result);
-                r_client.hget('proxy', 'proxy_list', (err, result) => {
+                let random_index = Math.floor(Math.random()*len);
+                r_client.lindex('proxy_list', random_index, (err, proxy) => {
                     if (err) reject(err);
-                    resolve(JSON.parse(result)[_index]);
-                    r_client.hset('proxy', 'proxy_index', _index++, redis.print);
+                    resolve(proxy);
                 })
             })
         })
@@ -134,6 +150,24 @@ module.exports = {
             r_client.rpush('asshole', url, (err, len) => {
                 if (err) reject(err);
                 resolve(len);
+            })
+        })
+    },
+
+    set_net_lock: (lock) => {
+        return new Promise((resolve, reject) => {
+            r_client.set('net_lock', lock, (err, result) => {
+                if (err) reject(err);
+                resolve(result);
+            })
+        })
+    },
+
+    get_net_lock: () => {
+        return new Promise((resolve, reject) => {
+            r_client.get('net_lock', (err, lock) => {
+                if (err) reject(err);
+                resolve(lock);
             })
         })
     }
