@@ -8,6 +8,7 @@ const mysql = require('mysql');
 const moment = require('moment');
 const db = require('./db');
 const cheerio = require('cheerio');
+const util = require('util');
 
 //initiate mysql
 let connection = mysql.createConnection({
@@ -29,6 +30,9 @@ r_client.hmset('proxy', {
 // cookie & agent
 let cookie = "SCF=AvTgBgYggK293VebdtLE8S3ESHQHmVX3AffiV1G0abAVLAB4LXZNMlWENe4f1UKFZdDT99tWPtnDtdDMUtgEZdk.; SUB=_2A25zVqCBDeRhGeFM4lAX9SzEyjyIHXVQuMDJrDV6PUJbktAKLU7FkW1NQIj27i796YGoXJBDiP57l3FvzBgXauE6; SUBP=0033WrSXqPxfM725Ws9jqgMF55529P9D9W5JbI6i0Pb6dq5dilJi3GmU5JpX5KzhUgL.FoME1KzcSKzReK52dJLoIEBLxKMLBoBLBKzLxK.L1KnLBoeLxKqL1h.L12BLxKnL12zLBo2t; SUHB=0BLop1loeSYQQi; _T_WM=87680097880";
 let agent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_3) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/80.0.3987.122 Safari/537.36";
+
+let username = 'renatus1812';
+let password = 'mpmtv3p6';
 
 function  get_random_agent_from_redis() {
     return new Promise((resolve, reject) => {
@@ -75,23 +79,23 @@ module.exports = class {
     get_html(url, cookie, agent, proxy) {
         return new Promise(async (resolve, reject) => {
             let random_agent = await db.get_random_agent_from_redis();
-            let random_proxy = await db.get_proxy();
+            //let random_proxy = await db.get_proxy();
             agent = agent || random_agent;
-            proxy = proxy || false;
+            let _proxy = util.format('http://%s:%d', proxy.split(':')[0], proxy.split(':')[1]);
             let options = {
                 url: url,
                 headers: {
-                    'user-agent': agent,
-                    'cookie': cookie
+                    'User-Agent': agent,
+                    'Cookie': cookie,
+                    'Host': 'weibo.cn'
                 },
-                proxy: random_proxy.toLowerCase()
+                proxy: _proxy
             };
             // assume proxy pattern is like 'xxx.xxx.xxx.xxx:port'
             console.log('options:', options);
             request(options, (err, resp, body) => {
                 if (err || resp.statusCode != 200) {
                     console.log('error:', err);
-                    console.log('crawl html error:', resp.statusCode);
                     console.log('current url:', url);
                     reject(err);
                 }
@@ -100,7 +104,7 @@ module.exports = class {
         })
     }
 
-    async crawl_to_date(user_id, start_url, target_date, cookie) {
+    async crawl_to_date(user_id, start_url, target_date, cookie, agent) {
         let _page = 2;
         let _stop = false;
         let _this = this;
@@ -108,7 +112,7 @@ module.exports = class {
         db.set_net_lock('1');
         while (!_stop) {
             try {
-                let html = await _this.get_html(start_url + '&page=' + _page, cookie);
+                let html = await _this.get_html(start_url + '&page=' + _page, cookie, agent);
                 console.log('page:', _page);
                 console.log('html:', html);
                 let time_stamp = moment().unix();
